@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>Botello</AssemblyName>
+    <RootNamespace>Botello</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+
+    <!-- Copy appsettings.json next to the output DLL -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+
+    <!-- Prevent MSBuild from loading this assembly as a build task -->
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+
+    <Description>MSBuild custom logger that forwards build events to Azure Application Insights via OpenTelemetry.</Description>
+    <Authors>Botello</Authors>
+  </PropertyGroup>
+
+  <!-- appsettings.json is deployed next to the DLL at build output -->
+  <ItemGroup>
+    <None Update="appsettings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- MSBuild extensibility -->
+    <PackageReference Include="Microsoft.Build.Framework" Version="18.3.3" />
+    <PackageReference Include="Microsoft.Build.Utilities.Core" Version="18.3.3" />
+
+    <!-- OpenTelemetry + Azure Monitor exporter (covers both logs and traces) -->
+    <PackageReference Include="Azure.Monitor.OpenTelemetry.Exporter" Version="1.6.0" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.15.0" />
+
+    <!-- Configuration: JSON file + environment variables -->
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.3" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="10.0.3" />
+
+    <!-- Logging abstractions (ILogger, LogLevel) -->
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.3" />
+  </ItemGroup>
+
+</Project>
