@@ -1,3 +1,5 @@
+[![.NET](https://github.com/panuoksala/Botello/actions/workflows/dotnet.yml/badge.svg)](https://github.com/panuoksala/Botello/actions/workflows/dotnet.yml)
+
 # Botello
 
 A custom logger that captures build events and forwards them to Open Telemetry compatible logging system such as **Azure Application Insights** as distributed traces and structured logs.
