@@ -1,6 +1,6 @@
 [![.NET](https://github.com/panuoksala/Botello/actions/workflows/dotnet.yml/badge.svg)](https://github.com/panuoksala/Botello/actions/workflows/dotnet.yml)
 
-# Botello
+# Botello📝
 
 A custom logger that captures build events and forwards them to Open Telemetry compatible logging system such as **Azure Application Insights** as distributed traces and structured logs.
 
@@ -8,7 +8,7 @@ Drop `Botello.dll` onto any `dotnet build` or `msbuild` command and get full bui
 
 ---
 
-## Features
+## Features⭐
 
 - **Distributed traces** — hierarchical spans for build → project → target with pass/fail status
 - **Structured logs** — errors, warnings, messages, and lifecycle events with rich `customDimensions`
@@ -19,14 +19,14 @@ Drop `Botello.dll` onto any `dotnet build` or `msbuild` command and get full bui
 
 ---
 
-## Requirements
+## Requirements🔗
 
 - .NET 10 SDK or later
 - An Azure Application Insights resource (connection string)
 
 ---
 
-## Installation
+## Installation💻
 
 Build the project to produce `Botello.dll`:
 
@@ -44,7 +44,7 @@ Copy the entire `net10.0/` output directory to a stable location (e.g. `~/.msbui
 
 ---
 
-## Quick Start
+## Quick Start🚀
 
 Set your Application Insights connection string as an environment variable and pass the logger path to `dotnet build`:
 
@@ -70,7 +70,7 @@ Within seconds of the build completing you will see:
 
 ---
 
-## Usage
+## Usage📝
 
 ### Minimal — connection string from environment
 
@@ -114,7 +114,7 @@ dotnet build MyApp.sln \
 
 ---
 
-## Configuration
+## Configuration🛠️
 
 Configuration is merged from three sources in ascending priority (last wins):
 
