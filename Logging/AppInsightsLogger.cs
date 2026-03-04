@@ -28,6 +28,7 @@ public sealed class AppInsightsLogger : Logger
 
     private LoggerConfig? _config;
     private OtelPipelineManager? _pipeline;
+    private string? _initError;
 
     private MelILogger? _buildLogger;
     private MelILogger? _projectLogger;
@@ -43,26 +44,41 @@ public sealed class AppInsightsLogger : Logger
     /// <inheritdoc/>
     public override void Initialize(IEventSource eventSource)
     {
-        var assemblyDir = Path.GetDirectoryName(typeof(AppInsightsLogger).Assembly.Location)
-                          ?? AppContext.BaseDirectory;
+        try
+        {
+            var assemblyDir = Path.GetDirectoryName(typeof(AppInsightsLogger).Assembly.Location)
+                              ?? AppContext.BaseDirectory;
 
-        _config = ConfigurationLoader.Load(Parameters, assemblyDir);
-        _config.Validate();
+            _config = ConfigurationLoader.Load(Parameters, assemblyDir);
+            _config.Validate();
 
-        _pipeline = new OtelPipelineManager();
-        _pipeline.Initialize(_config);
+            _pipeline = new OtelPipelineManager();
+            _pipeline.Initialize(_config);
 
-        _buildLogger   = _pipeline.CreateLogger(BuildCategory);
-        _projectLogger = _pipeline.CreateLogger(ProjectCategory);
-        _targetLogger  = _pipeline.CreateLogger(TargetCategory);
-        _messageLogger = _pipeline.CreateLogger(MessageCategory);
-        _warningLogger = _pipeline.CreateLogger(WarningCategory);
-        _errorLogger   = _pipeline.CreateLogger(ErrorCategory);
+            _buildLogger   = _pipeline.CreateLogger(BuildCategory);
+            _projectLogger = _pipeline.CreateLogger(ProjectCategory);
+            _targetLogger  = _pipeline.CreateLogger(TargetCategory);
+            _messageLogger = _pipeline.CreateLogger(MessageCategory);
+            _warningLogger = _pipeline.CreateLogger(WarningCategory);
+            _errorLogger   = _pipeline.CreateLogger(ErrorCategory);
+        }
+        catch (Exception ex)
+        {
+            // Surface the failure as an MSBuild warning so it is visible in the build output.
+            // Without this, MSBuild silently swallows exceptions thrown from Initialize() and
+            // deactivates the logger with no indication that anything went wrong.
+            _initError = ex.Message;
+        }
 
+        // Always subscribe to BuildStarted/BuildFinished so we can emit the init-error warning
+        // at the earliest opportunity (BuildStarted fires before any other events).
         eventSource.BuildStarted  += OnBuildStarted;
         eventSource.BuildFinished += OnBuildFinished;
 
-        if (_config.IncludeErrors)
+        if (_initError is not null)
+            return;
+
+        if (_config!.IncludeErrors)
             eventSource.ErrorRaised += OnErrorRaised;
 
         if (_config.IncludeWarnings)
@@ -87,8 +103,14 @@ public sealed class AppInsightsLogger : Logger
     /// <inheritdoc/>
     public override void Shutdown()
     {
-        _buildActivity?.Dispose();
-        _buildActivity = null;
+        // If BuildFinished was never raised (e.g. the build was cancelled or crashed),
+        // close the open build span as an error so it is not silently discarded.
+        if (_buildActivity is not null)
+        {
+            _buildActivity.SetStatus(ActivityStatusCode.Error, "Build did not complete normally");
+            _buildActivity.Dispose();
+            _buildActivity = null;
+        }
 
         // Disposing the pipeline flushes all in-flight batches to Application Insights.
         _pipeline?.Dispose();
@@ -97,6 +119,14 @@ public sealed class AppInsightsLogger : Logger
 
     private void OnBuildStarted(object sender, BuildStartedEventArgs e)
     {
+        if (_initError is not null)
+        {
+            // LoggerException is the correct way to surface a fatal logger failure through MSBuild.
+            // MSBuild catches it, prints it as a build error, and aborts — which is preferable to
+            // silently producing no telemetry and leaving the user wondering why App Insights is empty.
+            throw new LoggerException($"Botello: {_initError}");
+        }
+
         _buildActivity = OtelPipelineManager.BuildActivitySource
             .StartActivity("build", ActivityKind.Internal);
 
