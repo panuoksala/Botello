@@ -1,6 +1,6 @@
 # Botello
 
-An MSBuild custom logger that captures build events and forwards them to **Azure Application Insights** as distributed traces and structured logs via OpenTelemetry.
+A custom logger that captures build events and forwards them to Open Telemetry compatible logging system such as **Azure Application Insights** as distributed traces and structured logs.
 
 Drop `Botello.dll` onto any `dotnet build` or `msbuild` command and get full build observability in App Insights — no code changes to your projects required.
 
