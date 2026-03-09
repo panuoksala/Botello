@@ -56,8 +56,43 @@ internal static class ConfigurationLoader
             if (string.IsNullOrEmpty(value))
                 continue;
 
-            if (key.Equals("ConnectionString", StringComparison.OrdinalIgnoreCase))
+            // ── Exporter selection ──────────────────────────────────────
+            if (key.Equals("Exporter", StringComparison.OrdinalIgnoreCase))
+            {
+                if (Enum.TryParse(value, ignoreCase: true, out ExporterType exporter))
+                    config.Exporter = exporter;
+                else
+                    throw new InvalidOperationException(
+                        $"Botello: Unknown Exporter value '{value}'. " +
+                        "Valid values: AzureMonitor, Otlp.");
+            }
+            // ── Azure Monitor ───────────────────────────────────────────
+            else if (key.Equals("ConnectionString", StringComparison.OrdinalIgnoreCase))
                 config.ConnectionString = value;
+            // ── OTLP ────────────────────────────────────────────────────
+            else if (key.Equals("OtlpEndpoint", StringComparison.OrdinalIgnoreCase))
+                config.OtlpEndpoint = value;
+            else if (key.Equals("OtlpProtocol", StringComparison.OrdinalIgnoreCase))
+            {
+                if (Enum.TryParse(value, ignoreCase: true, out OtlpProtocolType protocol))
+                    config.OtlpProtocol = protocol;
+                else
+                    throw new InvalidOperationException(
+                        $"Botello: Unknown OtlpProtocol value '{value}'. " +
+                        "Valid values: Grpc, HttpProtobuf.");
+            }
+            else if (key.Equals("OtlpHeaders", StringComparison.OrdinalIgnoreCase))
+                config.OtlpHeaders = value;
+            else if (key.Equals("OtlpTimeout", StringComparison.OrdinalIgnoreCase))
+            {
+                if (int.TryParse(value, out var timeout) && timeout > 0)
+                    config.OtlpTimeout = timeout;
+                else
+                    throw new InvalidOperationException(
+                        $"Botello: Invalid OtlpTimeout value '{value}'. " +
+                        "Provide a positive integer (milliseconds).");
+            }
+            // ── Common ──────────────────────────────────────────────────
             else if (key.Equals("ServiceName", StringComparison.OrdinalIgnoreCase))
                 config.ServiceName = value;
             else if (key.Equals("MinimumLevel", StringComparison.OrdinalIgnoreCase))

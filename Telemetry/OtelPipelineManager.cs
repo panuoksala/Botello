@@ -3,6 +3,7 @@ using Azure.Monitor.OpenTelemetry.Exporter;
 using Microsoft.Extensions.Logging;
 using Botello.Config;
 using OpenTelemetry;
+using OpenTelemetry.Exporter;
 using OpenTelemetry.Logs;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
@@ -11,7 +12,8 @@ namespace Botello.Telemetry;
 
 /// <summary>
 /// Owns the OTel pipeline lifetime: a <see cref="TracerProvider"/> for spans
-/// and an <see cref="ILoggerFactory"/> for log records, both exporting to Azure Monitor.
+/// and an <see cref="ILoggerFactory"/> for log records, exporting to either
+/// Azure Monitor or any OTLP-compatible collector.
 /// Call <see cref="Initialize"/> once before use and <see cref="Dispose"/> to flush.
 /// </summary>
 internal sealed class OtelPipelineManager : IDisposable
@@ -52,10 +54,12 @@ internal sealed class OtelPipelineManager : IDisposable
         if (_disposed) return;
         _disposed = true;
 
-        // Traces first, then logs — preserves causality in App Insights.
+        // Traces first, then logs — preserves causality in the back-end.
         _tracerProvider?.Dispose();
         _loggerFactory?.Dispose();
     }
+
+    // ── Resource ────────────────────────────────────────────────────────
 
     private static ResourceBuilder BuildResourceBuilder(LoggerConfig config) =>
         ResourceBuilder
@@ -67,12 +71,23 @@ internal sealed class OtelPipelineManager : IDisposable
                 ["telemetry.sdk.name"]  = "Botello",
             });
 
-    private static TracerProvider BuildTracerProvider(LoggerConfig config, ResourceBuilder resourceBuilder) =>
-        Sdk.CreateTracerProviderBuilder()
+    // ── Traces ──────────────────────────────────────────────────────────
+
+    private static TracerProvider BuildTracerProvider(LoggerConfig config, ResourceBuilder resourceBuilder)
+    {
+        var builder = Sdk.CreateTracerProviderBuilder()
             .SetResourceBuilder(resourceBuilder)
-            .AddSource(ActivitySourceName)
-            .AddAzureMonitorTraceExporter(o => o.ConnectionString = config.ConnectionString)
-            .Build()!;
+            .AddSource(ActivitySourceName);
+
+        if (config.Exporter == ExporterType.Otlp)
+            builder.AddOtlpExporter(o => ApplyOtlpOptions(config, o));
+        else
+            builder.AddAzureMonitorTraceExporter(o => o.ConnectionString = config.ConnectionString);
+
+        return builder.Build()!;
+    }
+
+    // ── Logs ────────────────────────────────────────────────────────────
 
     private static ILoggerFactory BuildLoggerFactory(LoggerConfig config, ResourceBuilder resourceBuilder) =>
         LoggerFactory.Create(builder =>
@@ -81,9 +96,32 @@ internal sealed class OtelPipelineManager : IDisposable
             builder.AddOpenTelemetry(otel =>
             {
                 otel.SetResourceBuilder(resourceBuilder);
-                otel.IncludeFormattedMessage = true; // store rendered message, not just the template
-                otel.IncludeScopes = true;           // emit BeginScope values as customDimensions
-                otel.AddAzureMonitorLogExporter(o => o.ConnectionString = config.ConnectionString);
+                otel.IncludeFormattedMessage = true;
+                otel.IncludeScopes = true;
+
+                if (config.Exporter == ExporterType.Otlp)
+                    otel.AddOtlpExporter(o => ApplyOtlpOptions(config, o));
+                else
+                    otel.AddAzureMonitorLogExporter(o => o.ConnectionString = config.ConnectionString);
             });
         });
+
+    // ── OTLP shared configuration ──────────────────────────────────────
+
+    private static void ApplyOtlpOptions(LoggerConfig config, OtlpExporterOptions options)
+    {
+        options.Protocol = config.OtlpProtocol switch
+        {
+            OtlpProtocolType.HttpProtobuf => OtlpExportProtocol.HttpProtobuf,
+            _                             => OtlpExportProtocol.Grpc,
+        };
+
+        if (!string.IsNullOrWhiteSpace(config.OtlpEndpoint))
+            options.Endpoint = new Uri(config.OtlpEndpoint);
+
+        if (!string.IsNullOrWhiteSpace(config.OtlpHeaders))
+            options.Headers = config.OtlpHeaders;
+
+        options.TimeoutMilliseconds = config.OtlpTimeout;
+    }
 }
