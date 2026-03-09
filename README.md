@@ -2,9 +2,9 @@
 
 # Botello📝
 
-A custom logger that captures build events and forwards them to Open Telemetry compatible logging system such as **Azure Application Insights** as distributed traces and structured logs.
+A custom logger that captures build events and forwards them to any OpenTelemetry-compatible backend — **Azure Application Insights**, **Jaeger**, **Grafana Tempo**, **Seq**, **.NET Aspire Dashboard**, or any **OTLP collector** — as distributed traces and structured logs.
 
-Drop `Botello.dll` onto any `dotnet build` or `msbuild` command and get full build observability in App Insights — no code changes to your projects required.
+Drop `Botello.dll` onto any `dotnet build` or `msbuild` command and get full build observability — no code changes to your projects required.
 
 ---
 
@@ -12,17 +12,20 @@ Drop `Botello.dll` onto any `dotnet build` or `msbuild` command and get full bui
 
 - **Distributed traces** — hierarchical spans for build → project → target with pass/fail status
 - **Structured logs** — errors, warnings, messages, and lifecycle events with rich `customDimensions`
+- **Two exporters** — Azure Application Insights or any OTLP-compatible backend (gRPC / HTTP)
 - **Zero-code-change** — attach as an external logger; nothing in your project files changes
 - **Flexible configuration** — `appsettings.json`, environment variables, or inline CLI parameters
 - **Parallel-build safe** — span keys are composite to avoid collisions across MSBuild nodes
-- **Guaranteed flush** — all in-flight telemetry is flushed to Azure Monitor before the process exits
+- **Guaranteed flush** — all in-flight telemetry is flushed before the process exits
 
 ---
 
 ## Requirements🔗
 
 - .NET 10 SDK or later
-- An Azure Application Insights resource (connection string)
+- One of the following:
+  - An Azure Application Insights resource (connection string), **or**
+  - An OTLP-compatible collector endpoint (e.g. Jaeger, Grafana Tempo, Seq, Aspire Dashboard, OTel Collector)
 
 ---
 
@@ -46,7 +49,9 @@ Copy the entire `net10.0/` output directory to a stable location (e.g. `~/.msbui
 
 ## Quick Start🚀
 
-Set your Application Insights connection string as an environment variable and pass the logger path to `dotnet build`:
+### Azure Application Insights
+
+Set your connection string as an environment variable and pass the logger path to `dotnet build`:
 
 ```bash
 export APPLICATIONINSIGHTS_CONNECTION_STRING="InstrumentationKey=00000000-...;IngestionEndpoint=https://..."
@@ -62,9 +67,18 @@ $env:APPLICATIONINSIGHTS_CONNECTION_STRING = "InstrumentationKey=00000000-...;In
 dotnet build MyApp.sln -logger:"C:\tools\Botello\Botello.dll"
 ```
 
+### OTLP (Jaeger, Grafana, Aspire Dashboard, etc.)
+
+Point the logger at any OTLP collector — no Azure account needed:
+
+```bash
+dotnet build MyApp.sln \
+  -logger:"Botello.dll;Exporter=Otlp;OtlpEndpoint=http://localhost:4317"
+```
+
 Within seconds of the build completing you will see:
 
-- A **`build`** span in the App Insights Transaction Search / Application Map
+- A **`build`** span in your tracing UI
 - Child **`project: <name>`** spans for each `.csproj` built
 - Log entries for warnings, errors, and messages under the corresponding categories
 
@@ -72,7 +86,7 @@ Within seconds of the build completing you will see:
 
 ## Usage📝
 
-### Minimal — connection string from environment
+### Azure Monitor — connection string from environment
 
 ```bash
 dotnet build -logger:Botello.dll
@@ -83,13 +97,74 @@ Botello reads the connection string from either of these environment variables (
 1. `BOTELLO__CONNECTIONSTRING`
 2. `APPLICATIONINSIGHTS_CONNECTION_STRING` (the standard App Insights variable)
 
-### Inline parameters
-
-Pass all options directly on the command line using semicolon-separated `Key=Value` pairs after the DLL path:
+### Azure Monitor — inline parameters
 
 ```bash
 dotnet build MyApp.sln \
   -logger:"Botello.dll;ConnectionString=InstrumentationKey=...;ServiceName=my-app;MinimumLevel=Debug"
+```
+
+### OTLP — gRPC (default protocol)
+
+```bash
+# Jaeger with OTLP gRPC on default port 4317
+dotnet build MyApp.sln \
+  -logger:"Botello.dll;Exporter=Otlp;OtlpEndpoint=http://localhost:4317;ServiceName=my-app"
+```
+
+### OTLP — HTTP/protobuf
+
+```bash
+# Grafana Tempo or OTel Collector with HTTP/protobuf on default port 4318
+dotnet build MyApp.sln \
+  -logger:"Botello.dll;Exporter=Otlp;OtlpProtocol=HttpProtobuf;OtlpEndpoint=http://localhost:4318"
+```
+
+### OTLP — with authentication headers
+
+```bash
+# Grafana Cloud, Honeycomb, or any backend requiring auth headers
+dotnet build MyApp.sln \
+  -logger:"Botello.dll;Exporter=Otlp;OtlpEndpoint=https://otlp.example.com:4317;OtlpHeaders=Authorization=Bearer mytoken123"
+```
+
+### OTLP — .NET Aspire Dashboard
+
+```bash
+# The Aspire Dashboard listens on OTLP gRPC port 4317 by default
+docker run -d -p 18888:18888 -p 4317:18889 mcr.microsoft.com/dotnet/aspire-dashboard:latest
+
+dotnet build MyApp.sln \
+  -logger:"Botello.dll;Exporter=Otlp;OtlpEndpoint=http://localhost:4317;ServiceName=my-app"
+```
+
+Then open `http://localhost:18888` to see your build traces and logs.
+
+### OTLP — localhost defaults
+
+When using OTLP with no endpoint specified, Botello uses the OTel SDK defaults:
+- gRPC → `http://localhost:4317`
+- HTTP/protobuf → `http://localhost:4318`
+
+```bash
+# If your collector is on default ports, just set the exporter
+dotnet build -logger:"Botello.dll;Exporter=Otlp"
+```
+
+### OTLP — via environment variables
+
+```bash
+export BOTELLO__EXPORTER=Otlp
+export BOTELLO__OTLPENDPOINT=http://localhost:4317
+export BOTELLO__SERVICENAME=my-app
+
+dotnet build MyApp.sln -logger:Botello.dll
+```
+
+### Use with msbuild.exe
+
+```bash
+msbuild MyApp.sln /logger:"C:\tools\Botello\Botello.dll;Exporter=Otlp;OtlpEndpoint=http://localhost:4317"
 ```
 
 ### Override a single option while keeping appsettings.json
@@ -97,12 +172,6 @@ dotnet build MyApp.sln \
 ```bash
 # Enable target-level spans (off by default) without touching appsettings.json
 dotnet build -logger:"Botello.dll;IncludeTargetEvents=true"
-```
-
-### Use with msbuild.exe
-
-```bash
-msbuild MyApp.sln /logger:"C:\tools\Botello\Botello.dll;ConnectionString=...;ServiceName=MyApp"
 ```
 
 ### Suppress noisy telemetry on large solutions
@@ -120,18 +189,40 @@ Configuration is merged from three sources in ascending priority (last wins):
 
 | Priority | Source | Example |
 |---|---|---|
-| 1 (lowest) | `appsettings.json` next to the DLL | `"Botello": { "ServiceName": "my-app" }` |
-| 2 | Environment variables (`BOTELLO__*`) | `BOTELLO__SERVICENAME=my-app` |
-| 3 (highest) | MSBuild `Logger.Parameters` | `-logger:"Botello.dll;ServiceName=my-app"` |
+| 1 (lowest) | `appsettings.json` next to the DLL | `"Botello": { "Exporter": "Otlp" }` |
+| 2 | Environment variables (`BOTELLO__*`) | `BOTELLO__EXPORTER=Otlp` |
+| 3 (highest) | MSBuild `Logger.Parameters` | `-logger:"Botello.dll;Exporter=Otlp"` |
 
 ### All options
 
+#### Exporter selection
+
 | Key | Type | Default | Env var | Description |
 |---|---|---|---|---|
-| `ConnectionString` | `string` | *(none)* | `BOTELLO__CONNECTIONSTRING` | **Required.** Azure Application Insights connection string. Also accepts `APPLICATIONINSIGHTS_CONNECTION_STRING` as a fallback. |
-| `ServiceName` | `string` | `Botello` | `BOTELLO__SERVICENAME` | Service name shown in Application Insights. Reported as the `service.name` OpenTelemetry resource attribute. |
-| `MinimumLevel` | `LogLevel` | `Information` | `BOTELLO__MINIMUMLEVEL` | Minimum log level to emit. Accepted values: `Trace` `Debug` `Information` `Warning` `Error` `Critical`. |
-| `IncludeMessages` | `bool` | `true` | `BOTELLO__INCLUDEMESSAGES` | Forward `MessageRaised` events. High-importance → `Information`, Normal → `Debug`, Low → `Trace`. |
+| `Exporter` | `ExporterType` | `AzureMonitor` | `BOTELLO__EXPORTER` | Selects the telemetry back-end. Values: `AzureMonitor`, `Otlp`. |
+
+#### Azure Monitor options (used when Exporter = AzureMonitor)
+
+| Key | Type | Default | Env var | Description |
+|---|---|---|---|---|
+| `ConnectionString` | `string` | *(none)* | `BOTELLO__CONNECTIONSTRING` | **Required.** App Insights connection string. Also accepts `APPLICATIONINSIGHTS_CONNECTION_STRING` as a fallback. |
+
+#### OTLP options (used when Exporter = Otlp)
+
+| Key | Type | Default | Env var | Description |
+|---|---|---|---|---|
+| `OtlpEndpoint` | `string` | *(SDK default)* | `BOTELLO__OTLPENDPOINT` | Collector endpoint URL. Defaults to `http://localhost:4317` (gRPC) or `http://localhost:4318` (HTTP/protobuf). |
+| `OtlpProtocol` | `OtlpProtocolType` | `Grpc` | `BOTELLO__OTLPPROTOCOL` | Transport protocol. Values: `Grpc`, `HttpProtobuf`. |
+| `OtlpHeaders` | `string` | *(none)* | `BOTELLO__OTLPHEADERS` | Comma-separated `key=value` headers sent with every export request. |
+| `OtlpTimeout` | `int` | `10000` | `BOTELLO__OTLPTIMEOUT` | Export request timeout in milliseconds. |
+
+#### Common options
+
+| Key | Type | Default | Env var | Description |
+|---|---|---|---|---|
+| `ServiceName` | `string` | `Botello` | `BOTELLO__SERVICENAME` | Service name reported as the `service.name` OTel resource attribute. |
+| `MinimumLevel` | `LogLevel` | `Information` | `BOTELLO__MINIMUMLEVEL` | Minimum log level to emit. Values: `Trace` `Debug` `Information` `Warning` `Error` `Critical`. |
+| `IncludeMessages` | `bool` | `true` | `BOTELLO__INCLUDEMESSAGES` | Forward `MessageRaised` events. High → `Information`, Normal → `Debug`, Low → `Trace`. |
 | `IncludeWarnings` | `bool` | `true` | `BOTELLO__INCLUDEWARNINGS` | Forward `WarningRaised` events at `Warning` level. |
 | `IncludeErrors` | `bool` | `true` | `BOTELLO__INCLUDEERRORS` | Forward `ErrorRaised` events at `Error` level and mark the active span as failed. |
 | `IncludeProjectEvents` | `bool` | `true` | `BOTELLO__INCLUDEPROJECTEVENTS` | Emit spans and `Debug` log entries for `ProjectStarted` / `ProjectFinished`. |
@@ -141,11 +232,35 @@ Boolean options in `Logger.Parameters` accept `true`/`false`, `1`/`0`, `yes`/`no
 
 ### appsettings.json reference
 
+#### Azure Monitor
+
 ```json
 {
   "Botello": {
-    "ConnectionString": "",
-    "ServiceName": "Botello",
+    "Exporter": "AzureMonitor",
+    "ConnectionString": "InstrumentationKey=...",
+    "ServiceName": "my-app",
+    "MinimumLevel": "Information",
+    "IncludeMessages": true,
+    "IncludeWarnings": true,
+    "IncludeErrors": true,
+    "IncludeProjectEvents": true,
+    "IncludeTargetEvents": false
+  }
+}
+```
+
+#### OTLP
+
+```json
+{
+  "Botello": {
+    "Exporter": "Otlp",
+    "OtlpEndpoint": "http://localhost:4317",
+    "OtlpProtocol": "Grpc",
+    "OtlpHeaders": "",
+    "OtlpTimeout": 10000,
+    "ServiceName": "my-app",
     "MinimumLevel": "Information",
     "IncludeMessages": true,
     "IncludeWarnings": true,
@@ -179,7 +294,7 @@ Spans are marked `Ok` on success and `Error` (with a description) on failure. Wh
 
 ### Log categories
 
-Logs appear in Application Insights under the following category names (visible as the logger name / `customDimensions`):
+Logs appear under the following category names (visible as the logger name / `customDimensions`):
 
 | Category | Events |
 |---|---|
@@ -212,7 +327,7 @@ Every telemetry item carries these OpenTelemetry resource attributes:
 
 ## CI/CD Integration
 
-### GitHub Actions
+### GitHub Actions — Azure Monitor
 
 ```yaml
 - name: Build
@@ -221,6 +336,20 @@ Every telemetry item carries these OpenTelemetry resource attributes:
   run: |
     dotnet build MyApp.sln \
       -logger:"${{ github.workspace }}/tools/Botello/Botello.dll;ServiceName=my-app;MinimumLevel=Warning"
+```
+
+### GitHub Actions — OTLP
+
+```yaml
+- name: Build
+  env:
+    BOTELLO__EXPORTER: Otlp
+    BOTELLO__OTLPENDPOINT: ${{ secrets.OTLP_ENDPOINT }}
+    BOTELLO__OTLPHEADERS: "Authorization=Bearer ${{ secrets.OTLP_TOKEN }}"
+    BOTELLO__SERVICENAME: my-app
+  run: |
+    dotnet build MyApp.sln \
+      -logger:"${{ github.workspace }}/tools/Botello/Botello.dll"
 ```
 
 ### Azure Pipelines
@@ -243,7 +372,7 @@ Every telemetry item carries these OpenTelemetry resource attributes:
 
 1. MSBuild loads `Botello.dll` and calls `AppInsightsLogger.Initialize()`.
 2. `ConfigurationLoader` merges settings from `appsettings.json`, `BOTELLO__*` environment variables, and the `Logger.Parameters` string.
-3. `OtelPipelineManager` initialises a `TracerProvider` and an `ILoggerFactory`, both pointed at Azure Monitor.
+3. `OtelPipelineManager` initialises a `TracerProvider` and an `ILoggerFactory`, routing to either Azure Monitor or an OTLP collector based on the `Exporter` setting.
 4. `AppInsightsLogger` subscribes to the requested MSBuild event sources.
 5. During the build, each event creates an OTel span and/or log entry.
 6. When MSBuild calls `Shutdown()`, `OtelPipelineManager.Dispose()` flushes all in-flight batches — traces first, then logs — before returning, so no telemetry is dropped.
@@ -257,6 +386,7 @@ Every telemetry item carries these OpenTelemetry resource attributes:
 | `Microsoft.Build.Framework` | 18.3.3 |
 | `Microsoft.Build.Utilities.Core` | 18.3.3 |
 | `Azure.Monitor.OpenTelemetry.Exporter` | 1.6.0 |
+| `OpenTelemetry.Exporter.OpenTelemetryProtocol` | 1.15.0 |
 | `OpenTelemetry.Extensions.Hosting` | 1.15.0 |
 | `Microsoft.Extensions.Configuration.Json` | 10.0.3 |
 | `Microsoft.Extensions.Configuration.EnvironmentVariables` | 10.0.3 |
